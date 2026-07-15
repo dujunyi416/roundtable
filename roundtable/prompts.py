@@ -12,10 +12,26 @@ def _block(label: str, content: str) -> str:
 
 
 VERDICT_RULE = (
-    'End your reply with a line containing exactly "VERDICT: APPROVE" if the work '
-    'is good enough to ship as the final result, or "VERDICT: REVISE" if it needs '
-    "another iteration. Give specific, actionable critique before the verdict."
+    "Give specific, actionable critique first, then end your reply with this "
+    "exact protocol block:\n"
+    "SCORE: <integer 1-10, overall quality of the work>\n"
+    'BLOCKING ISSUES: <numbered list of problems that MUST be fixed before approval, or "none">\n'
+    'VERDICT: <"APPROVE" if good enough to ship as the final result, "REVISE" otherwise>\n'
+    "The VERDICT line must come last. You must not answer APPROVE while any "
+    "blocking issue remains."
 )
+
+ADVERSARIAL_RULE = (
+    "Style: ADVERSARIAL. Your job is to find what is wrong, not to be agreeable. "
+    "Actively challenge assumptions, hunt for edge cases, gaps, and errors. Before "
+    "you may answer APPROVE, you must have identified at least 2 concrete problems "
+    "and confirmed they are non-blocking — or explicitly explain why serious "
+    "scrutiny turned up nothing. A first-round APPROVE should be rare."
+)
+
+
+def _style_rule(style: str) -> str:
+    return f"{ADVERSARIAL_RULE}\n" if style == "adversarial" else ""
 
 _LEADER_TASK = {
     "discuss": (
@@ -56,23 +72,26 @@ def leader_kickoff(agent: str, other: str, mode: str, task: str) -> str:
     )
 
 
-def reviewer_first(agent: str, other: str, mode: str, task: str, material: str) -> str:
+def reviewer_first(agent: str, other: str, mode: str, task: str, material: str,
+                   style: str = "balanced") -> str:
     return (
         f"You are {agent}, acting as the REVIEWER in a two-AI collaboration run by "
         f"Roundtable. {other} (the leader) has produced a first attempt at the "
         f"human's task; both are below, verbatim.\n\n"
         f"{_REVIEWER_TASK[mode]}\n"
-        f"Respond in the same language as the task. {VERDICT_RULE}\n\n"
+        f"{_style_rule(style)}"
+        f"Respond in the same language as the task.\n{VERDICT_RULE}\n\n"
         f"{_block('TASK (verbatim from the human)', task)}\n\n"
         f"{_block(f'{other.upper()} DRAFT (verbatim)', material)}"
     )
 
 
-def reviewer_next(other: str, material: str) -> str:
+def reviewer_next(other: str, material: str, style: str = "balanced") -> str:
     return (
         f"{other} revised the work in response to your review; the new version is "
-        f"below, verbatim. Re-review it: check whether your earlier points were "
-        f"addressed and whether the revision introduced new problems.\n"
+        f"below, verbatim. Re-review it: check whether each of your blocking issues "
+        f"was resolved and whether the revision introduced new problems.\n"
+        f"{_style_rule(style)}"
         f"{VERDICT_RULE}\n\n"
         f"{_block(f'{other.upper()} REVISION (verbatim)', material)}"
     )
@@ -85,9 +104,9 @@ def leader_revision(other: str, mode: str, review: str) -> str:
         else "reply with your full revised version (self-contained, not a diff of your answer)"
     )
     return (
-        f"{other} reviewed your work; the review is below, verbatim. Address every "
-        f"point you agree with, push back explicitly on any you disagree with, "
-        f"then {action}.\n\n"
+        f"{other} reviewed your work; the review is below, verbatim. Respond to each "
+        f"numbered BLOCKING ISSUE point by point: fix the ones you agree with, push "
+        f"back explicitly on the ones you disagree with (and say why). Then {action}.\n\n"
         f"{_block(f'{other.upper()} REVIEW (verbatim)', review)}"
     )
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "roundtable"
-version = "0.1.0"
+version = "0.2.0"
 description = "Let Claude Code and Codex collaborate directly — zero-distortion relay, verdict-driven review rounds, auditable transcripts."
 readme = "README.md"
 requires-python = ">=3.10"

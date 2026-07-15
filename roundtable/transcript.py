@@ -47,12 +47,31 @@ class RunLog:
         })
         with self._transcript.open("a", encoding="utf-8") as fh:
             fh.write(f"\n## Round {round_no} — {speaker} ({role})\n\n{text}\n")
+        # Structured mirror of the transcript, consumed by `roundtable ui`.
+        with (self.dir / "messages.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "round": round_no,
+                "speaker": speaker,
+                "role": role,
+                "text": text,
+                "duration_s": round(duration_s, 1),
+                "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }, ensure_ascii=False) + "\n")
         self._flush_meta()
 
-    def verdict(self, round_no: int, verdict: str | None) -> None:
-        self.meta["verdicts"].append({"round": round_no, "verdict": verdict})
+    def verdict(self, round_no: int, verdict: str | None, score: int | None = None,
+                blocking_issues: str | None = None) -> None:
+        self.meta["verdicts"].append({
+            "round": round_no,
+            "verdict": verdict,
+            "score": score,
+            "blocking_issues": blocking_issues,
+        })
         if verdict is None:
             self.warn(f"round {round_no}: reviewer gave no VERDICT line; treating as REVISE")
+        elif score is None:
+            self.warn(f"round {round_no}: reviewer gave no SCORE line")
+        self._flush_meta()
 
     def warn(self, message: str) -> None:
         self.meta["warnings"].append(message)

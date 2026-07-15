@@ -52,7 +52,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="roundtable",
         description="Let Claude Code and Codex collaborate directly: leader drafts, "
                     "reviewer critiques with APPROVE/REVISE verdicts, iterate until consensus.",
-        epilog='Also: "roundtable doctor" checks that both CLIs are installed.',
+        epilog='Also: "roundtable doctor" checks that both CLIs are installed; '
+               '"roundtable ui" opens a live web viewer for past and running sessions.',
     )
     p.add_argument("task", help="the task/question, passed verbatim to both agents")
     p.add_argument("--mode", choices=["discuss", "plan", "build"], default="discuss",
@@ -60,6 +61,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "reviewer reviews the diff (default: discuss)")
     p.add_argument("--lead", choices=["claude", "codex"], default="claude",
                    help="which agent leads (default: claude)")
+    p.add_argument("--style", choices=["balanced", "adversarial"], default="balanced",
+                   help="reviewer style: adversarial requires concrete objections before "
+                        "any APPROVE — counters rubber-stamping (default: balanced)")
     p.add_argument("--max-rounds", type=int, default=3, metavar="N",
                    help="max review rounds before forced synthesis (default: 3)")
     p.add_argument("--claude-model", metavar="M", help="model for the claude side")
@@ -86,6 +90,15 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["doctor"]:
         return doctor()
+    if argv[:1] == ["ui"]:
+        from . import webui
+        up = argparse.ArgumentParser(prog="roundtable ui",
+                                     description="live web viewer for roundtable runs")
+        up.add_argument("--cwd", default=".", help="project dir containing .roundtable/ (default: .)")
+        up.add_argument("--port", type=int, default=8642, help="port on 127.0.0.1 (default: 8642)")
+        uargs = up.parse_args(argv[1:])
+        webui.serve(uargs.cwd, uargs.port)
+        return 0
     args = build_parser().parse_args(argv)
 
     lead, rev = args.lead, ("codex" if args.lead == "claude" else "claude")
@@ -113,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
     log = RunLog(
         args.cwd, args.task, args.mode, lead,
         {"max_rounds": args.max_rounds, "models": models, "dangerous": args.dangerous,
-         "mock": args.mock, "version": __version__},
+         "mock": args.mock, "style": args.style, "version": __version__},
     )
     print(f"roundtable run: {log.dir}")
 
@@ -125,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = orchestrator.run(
             args.task, leader, reviewer, args.mode, args.max_rounds,
-            log, args.cwd, echo=echo,
+            log, args.cwd, echo=echo, style=args.style,
         )
     except AdapterError as exc:
         log.finish("", "error")

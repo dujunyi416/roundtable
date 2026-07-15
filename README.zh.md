@@ -23,10 +23,17 @@
 ## 工作原理
 
 - **Leader**（可配置：`claude` 或 `codex`）先就任务产出初稿。
-- **Reviewer** 收到初稿*原文*，必须在评审末尾输出机器可解析的裁决行：`VERDICT: APPROVE` 或 `VERDICT: REVISE`。
-- 收到 `REVISE` 时，leader 会收到评审原文并修订重交——直到通过，或达到 `--max-rounds`（默认 3 轮）后由 leader 做最终综合，并明确列出未解决的分歧。
+- **Reviewer** 收到初稿*原文*，必须在评审末尾输出机器可解析的三段协议块：
+
+```
+SCORE: <1-10 整数，整体质量分>
+BLOCKING ISSUES: <必须修复才能通过的问题编号清单，或 "none">
+VERDICT: APPROVE | REVISE
+```
+
+- 收到 `REVISE` 时，leader 会收到评审原文，并被要求逐条回应每个编号的 blocking issue（修复它，或明确说明为什么不同意），然后重交——直到通过，或达到 `--max-rounds`（默认 3 轮）后由 leader 做最终综合，并明确列出未解决的分歧。
 - 每个 agent 全程使用**同一个连续会话**（`claude -p --resume` / `codex exec resume`），双方都记得完整的讨论过程。
-- 每条消息实时追加写入 `.roundtable/runs/<run-id>/transcript.md`；`meta.json` 记录模型、会话 id、裁决和耗时；`result.md` 保存最终产出。
+- 每条消息实时追加写入 `.roundtable/runs/<run-id>/transcript.md`；`messages.jsonl` 以结构化形式保存同样的消息（供 Web 查看器读取）；`meta.json` 记录模型、会话 id、分数、裁决和耗时；`result.md` 保存最终产出。
 
 ## 安装
 
@@ -65,6 +72,7 @@ roundtable "修复 tests/test_api.py 里失败的测试" --mode build --lead cod
 |---|---|---|
 | `--mode discuss\|plan\|build` | `discuss` | 见下表 |
 | `--lead claude\|codex` | `claude` | 谁主导；另一方评审 |
+| `--style balanced\|adversarial` | `balanced` | 评审风格（见下文） |
 | `--max-rounds N` | `3` | 强制综合前的最大评审轮数 |
 | `--claude-model` / `--codex-model` | CLI 默认 | 分侧指定模型 |
 | `--cwd DIR` | `.` | 两个 agent 的工作目录（产物也存这里） |
@@ -79,6 +87,23 @@ roundtable "修复 tests/test_api.py 里失败的测试" --mode build --lead cod
 | `discuss` | 联合结论 / 观点 | 双方只读 |
 | `plan` | 经过评审的实现计划 | 双方只读 |
 | `build` | `--cwd` 里的真实代码修改 | leader 可改文件；reviewer 只读审查 `git diff` |
+
+### 评审风格（`--style`）
+
+- `balanced`（默认）：reviewer 诚实评审，认为可以交付就通过。
+- `adversarial`（对抗式）：reviewer 被要求以挑毛病为目标——在允许 `APPROVE` 之前，必须先找出至少 2 个具体问题（或明确论证为什么认真审查后确实挑不出毛病）。当两个模型倾向于互相"盖章通过"时，用它来对抗走过场式评审。
+
+```bash
+roundtable "为这个 API 设计认证流程" --mode plan --style adversarial
+```
+
+## 实时 Web 查看器
+
+```bash
+roundtable ui [--cwd 目录] [--port 8642]
+```
+
+启动一个零依赖的本地查看器（`http://127.0.0.1:8642`，只绑定回环地址），展示 `<cwd>/.roundtable/runs` 下的所有运行：左侧是带状态徽章的运行列表，右侧以左右分侧的聊天气泡呈现完整对话——每轮带 SCORE 和 VERDICT 徽章，支持 Markdown/代码块渲染，底部是最终结果卡。运行中的会话每 2 秒自动刷新，可以实时看着一次运行收敛。v0.2 之前的旧运行（没有 `messages.jsonl`）会降级为原始 transcript 视图。
 
 ## 安全默认值
 

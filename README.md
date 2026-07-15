@@ -23,10 +23,17 @@ you ──task──▶ roundtable
 ## How it works
 
 - The **leader** (configurable: `claude` or `codex`) produces a first draft of the task.
-- The **reviewer** receives the draft *verbatim* and must end its critique with a machine-parseable line: `VERDICT: APPROVE` or `VERDICT: REVISE`.
-- On `REVISE`, the leader gets the review verbatim, revises, and resubmits — until approval or `--max-rounds` (default 3), after which the leader writes a final synthesis that explicitly lists unresolved disagreements.
+- The **reviewer** receives the draft *verbatim* and must end its critique with a machine-parseable three-part protocol block:
+
+```
+SCORE: <integer 1-10, overall quality>
+BLOCKING ISSUES: <numbered list of must-fix problems, or "none">
+VERDICT: APPROVE | REVISE
+```
+
+- On `REVISE`, the leader gets the review verbatim and must respond to each numbered blocking issue point by point (fix it or push back with reasons), then resubmit — until approval or `--max-rounds` (default 3), after which the leader writes a final synthesis that explicitly lists unresolved disagreements.
 - Each agent keeps **one continuous session** for the whole run (`claude -p --resume` / `codex exec resume`), so both remember the entire discussion.
-- Every message is appended to `.roundtable/runs/<run-id>/transcript.md` as it happens; `meta.json` records models, session ids, verdicts, and timings; `result.md` holds the final deliverable.
+- Every message is appended to `.roundtable/runs/<run-id>/transcript.md` as it happens; `messages.jsonl` holds the same messages in structured form (for the web viewer); `meta.json` records models, session ids, scores, verdicts, and timings; `result.md` holds the final deliverable.
 
 ## Install
 
@@ -65,6 +72,7 @@ roundtable "Fix the failing tests in tests/test_api.py" --mode build --lead code
 |---|---|---|
 | `--mode discuss\|plan\|build` | `discuss` | see table below |
 | `--lead claude\|codex` | `claude` | which agent leads; the other reviews |
+| `--style balanced\|adversarial` | `balanced` | reviewer attitude (see below) |
 | `--max-rounds N` | `3` | review rounds before forced synthesis |
 | `--claude-model` / `--codex-model` | CLI defaults | per-side model override |
 | `--cwd DIR` | `.` | working directory for both agents and artifacts |
@@ -79,6 +87,23 @@ roundtable "Fix the failing tests in tests/test_api.py" --mode build --lead code
 | `discuss` | joint answer / position | both read-only |
 | `plan` | reviewed implementation plan | both read-only |
 | `build` | actual code changes in `--cwd` | leader may edit files; reviewer reviews the `git diff` read-only |
+
+### Reviewer styles (`--style`)
+
+- `balanced` (default): the reviewer critiques honestly and approves when the work is good enough to ship.
+- `adversarial`: the reviewer is instructed to hunt for problems — it must identify at least 2 concrete issues (or explain why serious scrutiny found nothing) before it is allowed to `APPROVE`. Use this to counter rubber-stamping when the two models tend to agree too easily.
+
+```bash
+roundtable "Design the auth flow for this API" --mode plan --style adversarial
+```
+
+## Live web viewer
+
+```bash
+roundtable ui [--cwd DIR] [--port 8642]
+```
+
+Starts a zero-dependency local viewer at `http://127.0.0.1:8642` (loopback only), showing every run under `<cwd>/.roundtable/runs`: a run list with status badges on the left, and the full conversation as two-sided chat bubbles on the right — per-round SCORE and VERDICT badges, Markdown/code rendering, and the final result card. Running sessions refresh automatically every 2 seconds, so you can watch a live run converge. Pre-v0.2 runs (without `messages.jsonl`) fall back to the raw transcript view.
 
 ## Safety defaults
 

@@ -4,7 +4,8 @@ from __future__ import annotations
 from . import Adapter, Reply
 
 DEFAULT_REPLY = (
-    "(mock) I reviewed the message above and have no objections.\n\nVERDICT: APPROVE"
+    "(mock) I reviewed the message above and have no objections.\n\n"
+    "SCORE: 9\nBLOCKING ISSUES: none\nVERDICT: APPROVE"
 )
 
 
