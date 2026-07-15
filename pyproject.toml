@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "roundtable"
+version = "0.1.0"
+description = "Let Claude Code and Codex collaborate directly — zero-distortion relay, verdict-driven review rounds, auditable transcripts."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "dujunyi416" }]
+keywords = ["claude-code", "codex", "multi-agent", "orchestrator", "cli"]
+classifiers = [
+    "Environment :: Console",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+]
+
+[project.scripts]
+roundtable = "roundtable.__main__:main"
+
+[project.urls]
+Repository = "https://github.com/dujunyi416/roundtable"
+
+[tool.setuptools.packages.find]
+include = ["roundtable*"]
