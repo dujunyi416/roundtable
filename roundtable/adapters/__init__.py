@@ -22,6 +22,7 @@ class Reply:
     text: str
     duration_s: float = 0.0
     session_id: str | None = None
+    usage: dict | None = None
 
 
 def resolve_binary(candidates: list[str], env_var: str) -> str | None:
@@ -59,6 +60,7 @@ class Adapter:
         self.dangerous = dangerous
         self.timeout = timeout
         self.session_id: str | None = None
+        self.last_usage: dict | None = None
 
     def _build_command(self, first: bool) -> list[str]:
         raise NotImplementedError
@@ -74,10 +76,12 @@ class Adapter:
         """Hook for per-call cleanup. Always runs."""
 
     def send(self, prompt: str) -> Reply:
-        cmd = self._build_command(first=self.session_id is None)
         start = time.monotonic()
-        self._before_call()
         try:
+            # Per-call resources must exist before the command references them.
+            # Codex, for example, passes its temporary output file on the CLI.
+            self._before_call()
+            cmd = self._build_command(first=self.session_id is None)
             try:
                 proc = subprocess.run(
                     cmd,
@@ -104,4 +108,7 @@ class Adapter:
         finally:
             duration = time.monotonic() - start
             self._after_call()
-        return Reply(text=text, duration_s=duration, session_id=self.session_id)
+        return Reply(
+            text=text, duration_s=duration, session_id=self.session_id,
+            usage=self.last_usage,
+        )

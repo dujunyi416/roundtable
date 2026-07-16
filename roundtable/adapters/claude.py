@@ -56,6 +56,7 @@ class ClaudeAdapter(Adapter):
             raise AdapterError(f"claude reported an error: {data.get('result', data)}")
         if data.get("session_id"):
             self.session_id = data["session_id"]
+        self.last_usage = data.get("usage") if isinstance(data.get("usage"), dict) else None
         text = data.get("result")
         if not text:
             raise AdapterError(f"claude returned an empty result (subtype={data.get('subtype')})")

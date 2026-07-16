@@ -7,25 +7,20 @@ import subprocess
 import sys
 
 from . import __version__, orchestrator
+from .audit import default_audit_root
 from .adapters import AdapterError
-from .adapters.claude import INSTALL_HINT as CLAUDE_HINT
-from .adapters.claude import ClaudeAdapter
-from .adapters.codex import INSTALL_HINT as CODEX_HINT
-from .adapters.codex import CodexAdapter
 from .adapters.mock import MockAdapter
+from .participants import PROVIDERS, build_roster, create_participant, provider_names
+from .project import ProjectRoom
 from .transcript import RunLog
 
-AGENTS = {"claude": ClaudeAdapter, "codex": CodexAdapter}
 
-
-def doctor() -> int:
-    """Check that both CLIs (and git) are installed and answer `--version`."""
+def doctor(selected: list[str] | None = None) -> int:
+    """Check selected participant CLIs (and git) and answer `--version`."""
     ok = True
-    checks = [
-        ("claude", CLAUDE_HINT),
-        ("codex", CODEX_HINT),
-        ("git", "https://git-scm.com/downloads (needed for build mode diffs)"),
-    ]
+    names = selected or list(provider_names())
+    checks = [(PROVIDERS[name].command, PROVIDERS[name].install_hint) for name in names]
+    checks.append(("git", "https://git-scm.com/downloads (needed for build mode diffs)"))
     for name, hint in checks:
         path = shutil.which(name)
         if not path:
@@ -59,8 +54,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mode", choices=["discuss", "plan", "build"], default="discuss",
                    help="discuss: joint answer; plan: reviewed plan; build: leader edits files, "
                         "reviewer reviews the diff (default: discuss)")
-    p.add_argument("--lead", choices=["claude", "codex"], default="claude",
+    p.add_argument("--lead", choices=provider_names(), default="claude",
                    help="which agent leads (default: claude)")
+    p.add_argument("--reviewer", choices=provider_names(),
+                   help="reviewer provider (default: the other provider; may equal --lead)")
+    p.add_argument("--lead-name", help="display name for the leader")
+    p.add_argument("--reviewer-name", help="display name for the reviewer")
     p.add_argument("--style", choices=["balanced", "adversarial"], default="balanced",
                    help="reviewer style: adversarial requires concrete objections before "
                         "any APPROVE — counters rubber-stamping (default: balanced)")
@@ -68,7 +67,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="max review rounds before forced synthesis (default: 3)")
     p.add_argument("--claude-model", metavar="M", help="model for the claude side")
     p.add_argument("--codex-model", metavar="M", help="model for the codex side")
+    p.add_argument("--lead-model", metavar="M", help="model override for the leader role")
+    p.add_argument("--reviewer-model", metavar="M", help="model override for the reviewer role")
     p.add_argument("--cwd", default=".", help="working directory for both agents (default: .)")
+    p.add_argument("--no-project-context", action="store_true",
+                   help="do not include .roundtable/project.json in agent prompts")
     p.add_argument("--timeout", type=int, default=1200, metavar="SEC",
                    help="per-call timeout in seconds (default: 1200)")
     p.add_argument("--quiet", action="store_true", help="only print progress headers and the final result")
@@ -89,7 +92,10 @@ def main(argv: list[str] | None = None) -> int:
         pass
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["doctor"]:
-        return doctor()
+        dp = argparse.ArgumentParser(prog="roundtable doctor",
+                                     description="check only the providers you plan to use")
+        dp.add_argument("providers", nargs="*", choices=provider_names())
+        return doctor(dp.parse_args(argv[1:]).providers)
     if argv[:1] == ["ui"]:
         from . import webui
         up = argparse.ArgumentParser(prog="roundtable ui",
@@ -101,32 +107,46 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     args = build_parser().parse_args(argv)
 
-    lead, rev = args.lead, ("codex" if args.lead == "claude" else "claude")
-    models = {"claude": args.claude_model, "codex": args.codex_model}
+    provider_models = {"claude": args.claude_model, "codex": args.codex_model}
+    lead_spec, reviewer_spec = build_roster(
+        args.lead,
+        args.reviewer,
+        lead_name=args.lead_name,
+        reviewer_name=args.reviewer_name,
+        lead_model=args.lead_model,
+        reviewer_model=args.reviewer_model,
+        provider_models=provider_models,
+    )
 
-    def make(name: str, role: str):
-        if args.mock in (role, "both"):
-            return MockAdapter(cwd=args.cwd)
-        cls = AGENTS[name]
-        return cls(
+    def make(spec):
+        if args.mock in (spec.role, "both"):
+            adapter = MockAdapter(cwd=args.cwd)
+            adapter.name = spec.name
+            return adapter
+        return create_participant(
+            spec,
             cwd=args.cwd,
-            model=models[name],
-            writable=(role == "leader" and args.mode == "build"),
+            mode=args.mode,
             dangerous=args.dangerous,
             timeout=args.timeout,
         )
 
     try:
-        leader = make(lead, "leader")
-        reviewer = make(rev, "reviewer")
+        leader = make(lead_spec)
+        reviewer = make(reviewer_spec)
     except AdapterError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
+    participants = [lead_spec.as_dict(), reviewer_spec.as_dict()]
+    project_context = None if args.no_project_context else ProjectRoom(args.cwd).context_text()
     log = RunLog(
-        args.cwd, args.task, args.mode, lead,
-        {"max_rounds": args.max_rounds, "models": models, "dangerous": args.dangerous,
-         "mock": args.mock, "style": args.style, "version": __version__},
+        args.cwd, args.task, args.mode, lead_spec.name,
+        {"max_rounds": args.max_rounds, "participants": participants,
+         "provider_models": provider_models, "dangerous": args.dangerous,
+         "mock": args.mock, "style": args.style, "version": __version__,
+         "project_context": project_context},
+        audit_root=default_audit_root(),
     )
     print(f"roundtable run: {log.dir}")
 
@@ -139,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
         result = orchestrator.run(
             args.task, leader, reviewer, args.mode, args.max_rounds,
             log, args.cwd, echo=echo, style=args.style,
+            project_context=project_context,
         )
     except AdapterError as exc:
         log.finish("", "error")

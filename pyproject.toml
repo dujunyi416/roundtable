@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "roundtable"
-version = "0.2.0"
-description = "Let Claude Code and Codex collaborate directly — zero-distortion relay, verdict-driven review rounds, auditable transcripts."
+version = "0.3.0.dev0"
+description = "A human-in-the-loop collaboration workbench for CLI coding agents."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

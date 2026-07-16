@@ -39,8 +39,11 @@ _LEADER_TASK = {
         "state your reasoning and any assumptions you are making."
     ),
     "plan": (
-        "Draft a concrete implementation plan for the task: context, chosen "
-        "approach, files to touch, ordered steps, risks, and how to verify."
+        "Draft an execution-ready implementation plan. Use task IDs and ordered, "
+        "independently verifiable batches. For every task name the builder and "
+        "reviewer roles, files to touch, dependencies, acceptance criteria, exact "
+        "verification commands, risks, and rollback. End with a human approval "
+        "checkpoint that states the proposed first build batch."
     ),
     "build": (
         "Implement the task by editing files in the current working directory. "
@@ -59,7 +62,12 @@ _REVIEWER_TASK = {
 }
 
 
-def leader_kickoff(agent: str, other: str, mode: str, task: str) -> str:
+def leader_kickoff(agent: str, other: str, mode: str, task: str,
+                   project_context: str | None = None) -> str:
+    context = (
+        f"{_block('PROJECT ROOM CONTEXT', project_context)}\n\n"
+        if project_context else ""
+    )
     return (
         f"You are {agent}, acting as the LEADER in a two-AI collaboration run by "
         f"Roundtable. Your counterpart, {other}, will review your work and reply "
@@ -68,12 +76,17 @@ def leader_kickoff(agent: str, other: str, mode: str, task: str) -> str:
         f"and to the human who posed the task.\n\n"
         f"{_LEADER_TASK[mode]}\n"
         f"Respond in the same language as the task.\n\n"
+        f"{context}"
         f"{_block('TASK (verbatim from the human)', task)}"
     )
 
 
 def reviewer_first(agent: str, other: str, mode: str, task: str, material: str,
-                   style: str = "balanced") -> str:
+                   style: str = "balanced", project_context: str | None = None) -> str:
+    context = (
+        f"{_block('PROJECT ROOM CONTEXT', project_context)}\n\n"
+        if project_context else ""
+    )
     return (
         f"You are {agent}, acting as the REVIEWER in a two-AI collaboration run by "
         f"Roundtable. {other} (the leader) has produced a first attempt at the "
@@ -81,6 +94,7 @@ def reviewer_first(agent: str, other: str, mode: str, task: str, material: str,
         f"{_REVIEWER_TASK[mode]}\n"
         f"{_style_rule(style)}"
         f"Respond in the same language as the task.\n{VERDICT_RULE}\n\n"
+        f"{context}"
         f"{_block('TASK (verbatim from the human)', task)}\n\n"
         f"{_block(f'{other.upper()} DRAFT (verbatim)', material)}"
     )
@@ -111,10 +125,17 @@ def leader_revision(other: str, mode: str, review: str) -> str:
     )
 
 
-def leader_synthesis(other: str) -> str:
-    return (
+def human_intervention(text: str) -> str:
+    return _block("HUMAN INTERVENTION (verbatim)", text)
+
+
+def leader_synthesis(other: str, final_review: str | None = None) -> str:
+    prompt = (
         f"The round limit was reached without {other}'s approval. Produce the final "
         f"deliverable now: your best self-contained version incorporating the valid "
         f'critique, ending with a short "Open disagreements" section that lists any '
         f"unresolved points of disagreement (or states there are none)."
     )
+    if final_review:
+        prompt += f"\n\n{_block(f'{other.upper()} FINAL REVIEW (verbatim)', final_review)}"
+    return prompt

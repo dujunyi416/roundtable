@@ -4,8 +4,9 @@ First call:   codex exec --json -o <tmpfile> ... -            (prompt on stdin)
 Later calls:  codex exec resume ... <session_id> -            (prompt on stdin)
 
 The reply text is read from the --output-last-message file (reliable across
-codex versions). The session id is scraped from the --json event stream on a
-best-effort basis; if it can't be found we fall back to `resume --last`.
+codex versions). The session id must be present in the --json event stream;
+without an explicit id the adapter fails closed instead of risking cross-run
+session contamination through `resume --last`.
 """
 from __future__ import annotations
 
@@ -36,6 +37,23 @@ def _find_key(obj, keys):
     return None
 
 
+def _find_usage(obj):
+    if isinstance(obj, dict):
+        usage = obj.get("usage")
+        if isinstance(usage, dict):
+            return usage
+        for value in obj.values():
+            found = _find_usage(value)
+            if found:
+                return found
+    elif isinstance(obj, list):
+        for item in obj:
+            found = _find_usage(item)
+            if found:
+                return found
+    return None
+
+
 class CodexAdapter(Adapter):
     name = "codex"
 
@@ -44,7 +62,6 @@ class CodexAdapter(Adapter):
         self.binary = resolve_binary(["codex"], "ROUNDTABLE_CODEX_BIN")
         if not self.binary:
             raise AdapterError(f"codex CLI not found on PATH. Install: {INSTALL_HINT}")
-        self._resume_last = False  # fallback when no session id could be scraped
         self._out_file: str | None = None
 
     def _before_call(self) -> None:
@@ -61,19 +78,19 @@ class CodexAdapter(Adapter):
 
     def _build_command(self, first: bool) -> list[str]:
         cmd = [self.binary, "exec"]
-        if not first:
-            cmd.append("resume")
-        cmd += ["--json", "--output-last-message", self._out_file, "--skip-git-repo-check"]
         if self.dangerous:
             cmd += ["--sandbox", "danger-full-access"]
         elif self.writable:
             cmd += ["--sandbox", "workspace-write"]
         else:
             cmd += ["--sandbox", "read-only"]
+        if not first:
+            cmd.append("resume")
+        cmd += ["--json", "--output-last-message", self._out_file, "--skip-git-repo-check"]
         if self.model:
             cmd += ["-m", self.model]
         if not first:
-            cmd.append("--last" if self._resume_last else self.session_id)
+            cmd.append(self.session_id)
         cmd.append("-")  # read the prompt from stdin
         return cmd
 
@@ -91,6 +108,7 @@ class CodexAdapter(Adapter):
             raise AdapterError(f"codex returned no reply text. Last output:\n{detail}")
 
         sid = None
+        usage = None
         for line in stdout.splitlines():
             line = line.strip()
             if not line.startswith("{"):
@@ -99,15 +117,17 @@ class CodexAdapter(Adapter):
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            sid = _find_key(event, SESSION_KEYS)
-            if sid:
+            sid = sid or _find_key(event, SESSION_KEYS)
+            usage = usage or _find_usage(event)
+            if sid and usage:
                 break
         if sid:
             self.session_id = sid
         elif self.session_id is None:
-            # No id on the first call: resume the most recent session instead.
-            self._resume_last = True
-            self.session_id = "(resume --last)"
+            raise AdapterError(
+                "codex reply did not expose a session id; refusing unsafe resume --last"
+            )
+        self.last_usage = usage
         return text
 
     @staticmethod
